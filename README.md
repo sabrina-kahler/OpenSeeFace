@@ -34,6 +34,24 @@ Run the python script with `--help` to learn about the possible options you can 
 
     python facetracker.py --help
 
+To keep compatibility, `--ip` and `--port` still work exactly as before and all detected faces are sent to that endpoint.
+If you want to split faces by horizontal position and send each segment to a different UDP port on the same IP, use `--ports` with a comma-separated list.
+Examples:
+
+    # Legacy behavior (all faces to one port)
+    python facetracker.py --ip 127.0.0.1 --port 11573
+
+    # Horizontal split into 2 segments (left/right)
+    python facetracker.py --ip 127.0.0.1 --ports 11573,11574
+
+    # Horizontal split into 3 segments (left/center/right)
+    python facetracker.py --ip 127.0.0.1 --ports 11573,11574,11575
+
+When `--ports` is set, the image is divided from left to right into equal segments.
+For two ports: `x < 50%` goes to index `0`, `x >= 50%` goes to index `1`.
+For three ports, each segment is about `33%` of the width.
+The `--port-hysteresis` option (default `0.02`) adds a small boundary margin to reduce rapid port switching when a face oscillates around a split line.
+
 A simple demonstration can be achieved by creating a new scene in Unity, adding an empty game object and both the `OpenSee` and `OpenSeeShowPoints` components to it. While the scene is playing, run the face tracker on a video file:
 
     python facetracker.py --visualize 3 --pnp-points 1 --max-threads 4 -c video.mp4
@@ -238,4 +256,3 @@ Many thanks to everyone who helped me test things!
 The code and models are distributed under the BSD 2-clause license. 
 
 You can find licenses of third party libraries used for binary builds in the `Licenses` folder.
-

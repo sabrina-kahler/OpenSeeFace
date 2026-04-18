@@ -8,6 +8,8 @@ import gc
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-i", "--ip", help="Set IP address for sending tracking data", default="127.0.0.1")
 parser.add_argument("-p", "--port", type=int, help="Set port for sending tracking data", default=11573)
+parser.add_argument("--ports", type=str, help="Set comma-separated ports for horizontal face routing using the same IP", default="")
+parser.add_argument("--port-hysteresis", type=float, help="Set normalized hysteresis around routing boundaries (0 disables, 0.02 = 2 percent of each segment)", default=0.02)
 if os.name == 'nt':
     parser.add_argument("-l", "--list-cameras", type=int, help="Set this to 1 to list the available cameras and quit, set this to 2 or higher to output only the names", default=0)
     parser.add_argument("-a", "--list-dcaps", type=int, help="Set this to -1 to list all cameras and their available capabilities, set this to a camera id to list that camera's capabilities", default=None)
@@ -151,6 +153,53 @@ if args.benchmark > 0:
 
 target_ip = args.ip
 target_port = args.port
+target_ports = []
+
+if args.ports.strip() != "":
+    try:
+        target_ports = [int(port.strip()) for port in args.ports.split(",") if port.strip() != ""]
+    except ValueError:
+        print("Invalid --ports value. Expected comma-separated integers, e.g. --ports 11573,11574")
+        sys.exit(1)
+    if len(target_ports) < 2:
+        print("When --ports is set, provide at least two ports.")
+        sys.exit(1)
+    for port in target_ports:
+        if port < 1 or port > 65535:
+            print(f"Invalid port in --ports: {port}. Valid range is 1-65535.")
+            sys.exit(1)
+
+if args.port_hysteresis < 0:
+    print("--port-hysteresis must be >= 0.")
+    sys.exit(1)
+
+def get_horizontal_port_index(face, frame_width, port_count, previous_index=None, hysteresis=0.0):
+    if port_count <= 1 or frame_width <= 0:
+        return 0
+
+    if face.bbox is not None:
+        x_center = face.bbox[0] + face.bbox[2] * 0.5
+    else:
+        x_center = float(np.mean(face.lms[0:66, 1]))
+
+    ratio = x_center / float(frame_width)
+    ratio = max(0.0, min(0.999999, ratio))
+    index = int(ratio * port_count)
+
+    if previous_index is None or hysteresis <= 0 or previous_index < 0 or previous_index >= port_count or previous_index == index:
+        return index
+
+    segment = 1.0 / float(port_count)
+    if index > previous_index:
+        boundary = segment * index
+        if ratio < boundary + hysteresis * segment:
+            return previous_index
+    else:
+        boundary = segment * previous_index
+        if ratio > boundary - hysteresis * segment:
+            return previous_index
+
+    return index
 
 if args.faces >= 40:
     print("Transmission of tracking data over network is not supported with 40 or more faces.")
@@ -182,6 +231,7 @@ total_tracking_time = 0.0
 tracking_time = 0.0
 tracking_frames = 0
 frame_count = 0
+last_port_index_by_face_id = {}
 
 features = ["eye_l", "eye_r", "eyebrow_steepness_l", "eyebrow_updown_l", "eyebrow_quirk_l", "eyebrow_steepness_r", "eyebrow_updown_r", "eyebrow_quirk_r", "mouth_corner_updown_l", "mouth_corner_inout_l", "mouth_corner_updown_r", "mouth_corner_inout_r", "mouth_open", "mouth_wide"]
 
@@ -264,10 +314,12 @@ try:
                 tracking_time += inference_time / len(faces)
                 tracking_frames += 1
             packet = bytearray()
+            packets_by_port = {}
             detected = False
             for face_num, f in enumerate(faces):
                 f = copy.copy(f)
                 f.id += args.face_id_offset
+                face_packet = bytearray()
                 if f.eye_blink is None:
                     f.eye_blink = [1, 1]
                 right_state = "O" if f.eye_blink[0] > 0.30 else "-"
@@ -277,35 +329,35 @@ try:
                 detected = True
                 if not f.success:
                     pts_3d = np.zeros((70, 3), np.float32)
-                packet.extend(bytearray(struct.pack("d", now)))
-                packet.extend(bytearray(struct.pack("i", f.id)))
-                packet.extend(bytearray(struct.pack("f", width)))
-                packet.extend(bytearray(struct.pack("f", height)))
-                packet.extend(bytearray(struct.pack("f", f.eye_blink[0])))
-                packet.extend(bytearray(struct.pack("f", f.eye_blink[1])))
-                packet.extend(bytearray(struct.pack("B", 1 if f.success else 0)))
-                packet.extend(bytearray(struct.pack("f", f.pnp_error)))
-                packet.extend(bytearray(struct.pack("f", f.quaternion[0])))
-                packet.extend(bytearray(struct.pack("f", f.quaternion[1])))
-                packet.extend(bytearray(struct.pack("f", f.quaternion[2])))
-                packet.extend(bytearray(struct.pack("f", f.quaternion[3])))
-                packet.extend(bytearray(struct.pack("f", f.euler[0])))
-                packet.extend(bytearray(struct.pack("f", f.euler[1])))
-                packet.extend(bytearray(struct.pack("f", f.euler[2])))
-                packet.extend(bytearray(struct.pack("f", f.translation[0])))
-                packet.extend(bytearray(struct.pack("f", f.translation[1])))
-                packet.extend(bytearray(struct.pack("f", f.translation[2])))
+                face_packet.extend(bytearray(struct.pack("d", now)))
+                face_packet.extend(bytearray(struct.pack("i", f.id)))
+                face_packet.extend(bytearray(struct.pack("f", width)))
+                face_packet.extend(bytearray(struct.pack("f", height)))
+                face_packet.extend(bytearray(struct.pack("f", f.eye_blink[0])))
+                face_packet.extend(bytearray(struct.pack("f", f.eye_blink[1])))
+                face_packet.extend(bytearray(struct.pack("B", 1 if f.success else 0)))
+                face_packet.extend(bytearray(struct.pack("f", f.pnp_error)))
+                face_packet.extend(bytearray(struct.pack("f", f.quaternion[0])))
+                face_packet.extend(bytearray(struct.pack("f", f.quaternion[1])))
+                face_packet.extend(bytearray(struct.pack("f", f.quaternion[2])))
+                face_packet.extend(bytearray(struct.pack("f", f.quaternion[3])))
+                face_packet.extend(bytearray(struct.pack("f", f.euler[0])))
+                face_packet.extend(bytearray(struct.pack("f", f.euler[1])))
+                face_packet.extend(bytearray(struct.pack("f", f.euler[2])))
+                face_packet.extend(bytearray(struct.pack("f", f.translation[0])))
+                face_packet.extend(bytearray(struct.pack("f", f.translation[1])))
+                face_packet.extend(bytearray(struct.pack("f", f.translation[2])))
                 if log is not None:
                     log.write(f"{frame_count},{now},{width},{height},{fps},{face_num},{f.id},{f.eye_blink[0]},{f.eye_blink[1]},{f.conf},{f.success},{f.pnp_error},{f.quaternion[0]},{f.quaternion[1]},{f.quaternion[2]},{f.quaternion[3]},{f.euler[0]},{f.euler[1]},{f.euler[2]},{f.rotation[0]},{f.rotation[1]},{f.rotation[2]},{f.translation[0]},{f.translation[1]},{f.translation[2]}")
                 for (x,y,c) in f.lms:
-                    packet.extend(bytearray(struct.pack("f", c)))
+                    face_packet.extend(bytearray(struct.pack("f", c)))
                 if args.visualize > 1:
                     frame = cv2.putText(frame, str(f.id), (int(f.bbox[0]), int(f.bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255,0,255))
                 if args.visualize > 2:
                     frame = cv2.putText(frame, f"{f.conf:.4f}", (int(f.bbox[0] + 18), int(f.bbox[1] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
                 for pt_num, (x,y,c) in enumerate(f.lms):
-                    packet.extend(bytearray(struct.pack("f", y)))
-                    packet.extend(bytearray(struct.pack("f", x)))
+                    face_packet.extend(bytearray(struct.pack("f", y)))
+                    face_packet.extend(bytearray(struct.pack("f", x)))
                     if log is not None:
                         log.write(f",{y},{x},{c}")
                     if pt_num == 66 and (f.eye_blink[0] < 0.30 or c < 0.20):
@@ -342,9 +394,9 @@ try:
                         if not (x < 0 or y < 0 or x >= height or y >= width):
                             frame[int(x), int(y)] = (0, 255, 255)
                 for (x,y,z) in f.pts_3d:
-                    packet.extend(bytearray(struct.pack("f", x)))
-                    packet.extend(bytearray(struct.pack("f", -y)))
-                    packet.extend(bytearray(struct.pack("f", -z)))
+                    face_packet.extend(bytearray(struct.pack("f", x)))
+                    face_packet.extend(bytearray(struct.pack("f", -y)))
+                    face_packet.extend(bytearray(struct.pack("f", -z)))
                     if log is not None:
                         log.write(f",{x},{-y},{-z}")
                 if f.current_features is None:
@@ -352,15 +404,33 @@ try:
                 for feature in features:
                     if not feature in f.current_features:
                         f.current_features[feature] = 0
-                    packet.extend(bytearray(struct.pack("f", f.current_features[feature])))
+                    face_packet.extend(bytearray(struct.pack("f", f.current_features[feature])))
                     if log is not None:
                         log.write(f",{f.current_features[feature]}")
                 if log is not None:
                     log.write("\r\n")
                     log.flush()
 
+                if len(target_ports) > 0:
+                    previous_index = None
+                    if f.id in last_port_index_by_face_id:
+                        previous_index = last_port_index_by_face_id[f.id]
+                    port_index = get_horizontal_port_index(f, width, len(target_ports), previous_index=previous_index, hysteresis=args.port_hysteresis)
+                    last_port_index_by_face_id[f.id] = port_index
+                    route_port = target_ports[port_index]
+                    if not route_port in packets_by_port:
+                        packets_by_port[route_port] = bytearray()
+                    packets_by_port[route_port].extend(face_packet)
+                else:
+                    packet.extend(face_packet)
+
             if detected and len(faces) < 40:
-                sock.sendto(packet, (target_ip, target_port))
+                if len(target_ports) > 0:
+                    for route_port, route_packet in packets_by_port.items():
+                        if len(route_packet) > 0:
+                            sock.sendto(route_packet, (target_ip, route_port))
+                else:
+                    sock.sendto(packet, (target_ip, target_port))
 
             if out is not None:
                 video_frame = frame
