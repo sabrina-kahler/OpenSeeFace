@@ -322,6 +322,7 @@ try:
             for face_num, f in enumerate(faces):
                 f = copy.copy(f)
                 f.id += args.face_id_offset
+                # In single-port mode, write face payload directly into packet to avoid per-face copy.
                 face_packet = bytearray() if multiport else packet
                 if f.eye_blink is None:
                     f.eye_blink = [1, 1]
