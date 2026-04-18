@@ -174,6 +174,7 @@ if args.port_hysteresis < 0:
     sys.exit(1)
 
 def get_horizontal_port_index(face, frame_width, port_count, previous_index=None, hysteresis=0.0):
+    max_ratio = 1.0 - 1e-6
     if port_count <= 1 or frame_width <= 0:
         return 0
 
@@ -183,7 +184,7 @@ def get_horizontal_port_index(face, frame_width, port_count, previous_index=None
         x_center = float(np.mean(face.lms[0:66, 1]))
 
     ratio = x_center / float(frame_width)
-    ratio = max(0.0, min(0.999999, ratio))
+    ratio = max(0.0, min(max_ratio, ratio))
     index = int(ratio * port_count)
 
     if previous_index is None or hysteresis <= 0 or previous_index < 0 or previous_index >= port_count or previous_index == index:
