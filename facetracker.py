@@ -328,9 +328,7 @@ try:
                 packet_face_id = f.id
                 route_port = target_port
                 if multiport:
-                    previous_index = None
-                    if f.id in last_port_index_by_face_id:
-                        previous_index = last_port_index_by_face_id[f.id]
+                    previous_index = last_port_index_by_face_id.get(f.id)
                     port_index = get_horizontal_port_index(f, width, len(target_ports), previous_index=previous_index, hysteresis=args.port_hysteresis)
                     last_port_index_by_face_id[f.id] = port_index
                     route_port = target_ports[port_index]
