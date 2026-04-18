@@ -174,18 +174,21 @@ if args.port_hysteresis < 0:
     sys.exit(1)
 
 def get_horizontal_port_index(face, frame_width, port_count, previous_index=None, hysteresis=0.0):
+    """Map a face to a horizontal port segment, with optional boundary hysteresis."""
     max_ratio = 1.0 - 1e-6
     if port_count <= 1 or frame_width <= 0:
         return 0
 
-    if face.bbox is not None:
-        x_center = face.bbox[0] + face.bbox[2] * 0.5
-    else:
-        x_center = float(np.mean(face.lms[0:66, 1]))
+    if face.bbox is None:
+        if previous_index is not None and previous_index >= 0 and previous_index < port_count:
+            return previous_index
+        return 0
+
+    x_center = face.bbox[0] + face.bbox[2] * 0.5
 
     ratio = x_center / float(frame_width)
     ratio = max(0.0, min(max_ratio, ratio))
-    index = int(ratio * port_count)
+    index = min(int(ratio * port_count), port_count - 1)
 
     if previous_index is None or hysteresis <= 0 or previous_index < 0 or previous_index >= port_count or previous_index == index:
         return index
