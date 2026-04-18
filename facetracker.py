@@ -7,8 +7,7 @@ import gc
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-i", "--ip", help="Set IP address for sending tracking data", default="127.0.0.1")
-parser.add_argument("-p", "--port", type=int, help="Set port for sending tracking data", default=11573)
-parser.add_argument("--ports", type=str, help="Set comma-separated ports for horizontal face routing using the same IP", default="")
+parser.add_argument("-p", "--port", type=str, help="Set port or comma-separated ports for sending tracking data", default="11573")
 parser.add_argument("--port-hysteresis", type=float, help="Set normalized hysteresis around routing boundaries (0 disables, 0.02 = 2 percent of each segment)", default=0.02)
 if os.name == 'nt':
     parser.add_argument("-l", "--list-cameras", type=int, help="Set this to 1 to list the available cameras and quit, set this to 2 or higher to output only the names", default=0)
@@ -152,22 +151,21 @@ if args.benchmark > 0:
     sys.exit(0)
 
 target_ip = args.ip
-target_port = args.port
 target_ports = []
 
-if args.ports.strip() != "":
-    try:
-        target_ports = [int(port.strip()) for port in args.ports.split(",") if port.strip() != ""]
-    except ValueError:
-        print("Invalid --ports value. Expected comma-separated integers, e.g. --ports 11573,11574")
+try:
+    target_ports = [int(port.strip()) for port in args.port.split(",") if port.strip() != ""]
+except ValueError:
+    print("Invalid --port value. Expected an integer or comma-separated integers, e.g. --port 11573 or --port 11573,11574")
+    sys.exit(1)
+if len(target_ports) == 0:
+    print("Invalid --port value. Provide at least one port.")
+    sys.exit(1)
+for port in target_ports:
+    if port < 1 or port > 65535:
+        print(f"Invalid port in --port: {port}. Valid range is 1-65535.")
         sys.exit(1)
-    if len(target_ports) < 2:
-        print("When --ports is set, provide at least two ports.")
-        sys.exit(1)
-    for port in target_ports:
-        if port < 1 or port > 65535:
-            print(f"Invalid port in --ports: {port}. Valid range is 1-65535.")
-            sys.exit(1)
+target_port = target_ports[0]
 
 if args.port_hysteresis < 0:
     print("--port-hysteresis must be >= 0.")
@@ -415,7 +413,7 @@ try:
                     log.write("\r\n")
                     log.flush()
 
-                if len(target_ports) > 0:
+                if len(target_ports) > 1:
                     previous_index = None
                     if f.id in last_port_index_by_face_id:
                         previous_index = last_port_index_by_face_id[f.id]
@@ -429,7 +427,7 @@ try:
                     packet.extend(face_packet)
 
             if detected and len(faces) < 40:
-                if len(target_ports) > 0:
+                if len(target_ports) > 1:
                     for route_port, route_packet in packets_by_port.items():
                         if len(route_packet) > 0:
                             sock.sendto(route_packet, (target_ip, route_port))

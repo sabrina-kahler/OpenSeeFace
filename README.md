@@ -34,20 +34,21 @@ Run the python script with `--help` to learn about the possible options you can 
 
     python facetracker.py --help
 
-To keep compatibility, `--ip` and `--port` still work exactly as before and all detected faces are sent to that endpoint.
-If you want to split faces by horizontal position and send each segment to a different UDP port on the same IP, use `--ports` with a comma-separated list.
+The `--ip` and `--port` options control the UDP destination.
+If `--port` contains a single value, all detected faces are sent to that one port (legacy behavior).
+If `--port` contains a comma-separated list, faces are split by horizontal position and routed to the corresponding port index.
 Examples:
 
     # Legacy behavior (all faces to one port)
     python facetracker.py --ip 127.0.0.1 --port 11573
 
     # Horizontal split into 2 segments (left/right)
-    python facetracker.py --ip 127.0.0.1 --ports 11573,11574
+    python facetracker.py --ip 127.0.0.1 --port 11573,11574
 
     # Horizontal split into 3 segments (left/center/right)
-    python facetracker.py --ip 127.0.0.1 --ports 11573,11574,11575
+    python facetracker.py --ip 127.0.0.1 --port 11573,11574,11575
 
-When `--ports` is set, the image is divided from left to right into equal segments.
+When multiple ports are set in `--port`, the image is divided from left to right into equal segments.
 For two ports: `x < 50%` goes to index `0`, `x >= 50%` goes to index `1`.
 For three ports, each segment is about `33%` of the width.
 The `--port-hysteresis` option (default `0.02`) adds a small boundary margin to reduce rapid port switching when a face oscillates around a split line.
