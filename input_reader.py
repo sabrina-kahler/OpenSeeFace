@@ -111,7 +111,7 @@ class OpenCVReader(VideoReader):
         super(OpenCVReader, self).__init__(capture, camera=True)
         self.cap.set(3, width)
         self.cap.set(4, height)
-        self.cap.set(38, 1)
+        self.cap.set(38, 10)
     def is_open(self):
         return super(OpenCVReader, self).is_open()
     def is_ready(self):
@@ -134,7 +134,7 @@ class V4L2Reader(OpenCVReader):
         self.name = str(capture)
         self.cap.set(3, width)
         self.cap.set(4, height)
-        self.cap.set(38, 1)
+        self.cap.set(38, 10)
         self.cap.set(5, fps)
     def is_open(self):
         return super(V4L2Reader, self).is_open()
