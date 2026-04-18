@@ -318,12 +318,24 @@ try:
             packet = bytearray()
             multiport = len(target_ports) > 1
             packets_by_port = {} if multiport else None
+            local_face_id_by_port = {} if multiport else None
             detected = False
             for face_num, f in enumerate(faces):
                 f = copy.copy(f)
                 f.id += args.face_id_offset
                 # In single-port mode, write face payload directly into packet to avoid per-face copy.
                 face_packet = bytearray() if multiport else packet
+                packet_face_id = f.id
+                route_port = target_port
+                if multiport:
+                    previous_index = None
+                    if f.id in last_port_index_by_face_id:
+                        previous_index = last_port_index_by_face_id[f.id]
+                    port_index = get_horizontal_port_index(f, width, len(target_ports), previous_index=previous_index, hysteresis=args.port_hysteresis)
+                    last_port_index_by_face_id[f.id] = port_index
+                    route_port = target_ports[port_index]
+                    packet_face_id = local_face_id_by_port.get(route_port, 0)
+                    local_face_id_by_port[route_port] = packet_face_id + 1
                 if f.eye_blink is None:
                     f.eye_blink = [1, 1]
                 right_state = "O" if f.eye_blink[0] > 0.30 else "-"
@@ -334,7 +346,7 @@ try:
                 if not f.success:
                     pts_3d = np.zeros((70, 3), np.float32)
                 face_packet.extend(bytearray(struct.pack("d", now)))
-                face_packet.extend(bytearray(struct.pack("i", f.id)))
+                face_packet.extend(bytearray(struct.pack("i", packet_face_id)))
                 face_packet.extend(bytearray(struct.pack("f", width)))
                 face_packet.extend(bytearray(struct.pack("f", height)))
                 face_packet.extend(bytearray(struct.pack("f", f.eye_blink[0])))
@@ -416,12 +428,6 @@ try:
                     log.flush()
 
                 if multiport:
-                    previous_index = None
-                    if f.id in last_port_index_by_face_id:
-                        previous_index = last_port_index_by_face_id[f.id]
-                    port_index = get_horizontal_port_index(f, width, len(target_ports), previous_index=previous_index, hysteresis=args.port_hysteresis)
-                    last_port_index_by_face_id[f.id] = port_index
-                    route_port = target_ports[port_index]
                     if not route_port in packets_by_port:
                         packets_by_port[route_port] = bytearray()
                     packets_by_port[route_port].extend(face_packet)
