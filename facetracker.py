@@ -316,12 +316,13 @@ try:
                 tracking_time += inference_time / len(faces)
                 tracking_frames += 1
             packet = bytearray()
-            packets_by_port = {}
+            multiport = len(target_ports) > 1
+            packets_by_port = {} if multiport else None
             detected = False
             for face_num, f in enumerate(faces):
                 f = copy.copy(f)
                 f.id += args.face_id_offset
-                face_packet = bytearray()
+                face_packet = bytearray() if multiport else packet
                 if f.eye_blink is None:
                     f.eye_blink = [1, 1]
                 right_state = "O" if f.eye_blink[0] > 0.30 else "-"
@@ -413,7 +414,7 @@ try:
                     log.write("\r\n")
                     log.flush()
 
-                if len(target_ports) > 1:
+                if multiport:
                     previous_index = None
                     if f.id in last_port_index_by_face_id:
                         previous_index = last_port_index_by_face_id[f.id]
@@ -423,11 +424,9 @@ try:
                     if not route_port in packets_by_port:
                         packets_by_port[route_port] = bytearray()
                     packets_by_port[route_port].extend(face_packet)
-                else:
-                    packet.extend(face_packet)
 
             if detected and len(faces) < 40:
-                if len(target_ports) > 1:
+                if multiport:
                     for route_port, route_packet in packets_by_port.items():
                         if len(route_packet) > 0:
                             sock.sendto(route_packet, (target_ip, route_port))
